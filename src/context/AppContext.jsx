@@ -1,5 +1,5 @@
-import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
-import { DEVICES, BATTERY_CAPACITY_WH, generateHistoricalData } from '../data/initialData';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { BATTERY_CAPACITY_WH, DEVICES, generateHistoricalData } from '../data/initialData';
 
 const AppContext = createContext(null);
 
@@ -10,189 +10,165 @@ export const useApp = () => {
 };
 
 export const AppProvider = ({ children }) => {
-  // Auth
-  const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    return localStorage.getItem('vw_auth') === 'true';
-  });
+  const [isAuthenticated, setIsAuthenticated] = useState(() => localStorage.getItem('vw_auth') === 'true');
   const [user, setUser] = useState(() => {
-    const u = localStorage.getItem('vw_user');
-    return u ? JSON.parse(u) : null;
+    const savedUser = localStorage.getItem('vw_user');
+    return savedUser ? JSON.parse(savedUser) : null;
   });
-
-  // Settings
   const [settings, setSettings] = useState(() => {
-    const s = localStorage.getItem('vw_settings');
-    return s ? JSON.parse(s) : {
-      lowBatteryThreshold: 20,
-      overloadThreshold: 2000,
-      alertsEnabled: true,
-      darkMode: true,
-      notifications: { lowBattery: true, overload: true, sourceChange: true },
-    };
+    const savedSettings = localStorage.getItem('vw_settings');
+    return savedSettings
+      ? JSON.parse(savedSettings)
+      : {
+          lowBatteryThreshold: 20,
+          overloadThreshold: 2000,
+          alertsEnabled: true,
+          darkMode: true,
+          notifications: { lowBattery: true, overload: true, sourceChange: true },
+        };
   });
 
-  // Devices
   const [devices, setDevices] = useState(DEVICES);
-
-  // Power state
   const [batteryPct, setBatteryPct] = useState(78);
-  const [powerSource, setPowerSource] = useState('grid'); // grid | inverter | generator
+  const [powerSource, setPowerSource] = useState('grid');
   const [gridAvailable, setGridAvailable] = useState(true);
   const [generatorAvailable, setGeneratorAvailable] = useState(false);
-  const [chargingStatus, setChargingStatus] = useState('charging'); // charging | discharging | idle
-
-  // Analytics
+  const [chargingStatus, setChargingStatus] = useState('charging');
   const [historicalData, setHistoricalData] = useState(() => generateHistoricalData());
-
-  // Alerts
   const [alerts, setAlerts] = useState([]);
+
   const alertIdRef = useRef(0);
   const shownAlertsRef = useRef(new Set());
-
-  // Derived: total load
-  const totalLoad = devices.filter(d => d.isOn).reduce((sum, d) => sum + d.watts, 0);
-
-  // Backup time in minutes
-  const backupTimeMinutes = totalLoad > 0
-    ? Math.round((batteryPct / 100) * BATTERY_CAPACITY_WH / totalLoad * 60)
-    : 9999;
+  const totalLoad = devices.filter((device) => device.isOn).reduce((sum, device) => sum + device.watts, 0);
+  const backupTimeMinutes =
+    totalLoad > 0 ? Math.round(((batteryPct / 100) * BATTERY_CAPACITY_WH * 60) / totalLoad) : 9999;
 
   const formatBackupTime = (mins) => {
-    if (mins >= 9999) return '∞';
-    const h = Math.floor(mins / 60);
-    const m = mins % 60;
-    if (h > 0) return `${h}h ${m}m`;
-    return `${m}m`;
+    if (mins >= 9999) return 'Infinity';
+    const hours = Math.floor(mins / 60);
+    const minutes = mins % 60;
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    return `${minutes}m`;
   };
 
-  // Login / logout
   const login = (username, password) => {
     const validUsers = [
       { username: 'admin', password: 'volt2024', name: 'Goodness Emmanuel', role: 'Home Admin' },
       { username: 'demo', password: 'demo123', name: 'Demo User', role: 'Viewer' },
     ];
-    const found = validUsers.find(u => u.username === username && u.password === password);
-    if (found) {
-      const userData = { username: found.username, name: found.name, role: found.role };
-      setIsAuthenticated(true);
-      setUser(userData);
-      localStorage.setItem('vw_auth', 'true');
-      localStorage.setItem('vw_user', JSON.stringify(userData));
-      return { success: true };
+    const found = validUsers.find((candidate) => candidate.username === username && candidate.password === password);
+
+    if (!found) {
+      return { success: false, error: 'Invalid credentials. Try admin / volt2024' };
     }
-    return { success: false, error: 'Invalid credentials. Try admin / volt2024' };
+
+    const userData = { username: found.username, name: found.name, role: found.role };
+    setIsAuthenticated(true);
+    setUser(userData);
+    localStorage.setItem('vw_auth', 'true');
+    localStorage.setItem('vw_user', JSON.stringify(userData));
+    return { success: true };
   };
 
-  const logout = () => {
+  const logout = useCallback(() => {
     setIsAuthenticated(false);
     setUser(null);
     localStorage.removeItem('vw_auth');
     localStorage.removeItem('vw_user');
-  };
-
-  // Toggle device
-  const toggleDevice = useCallback((deviceId) => {
-    setDevices(prev => prev.map(d => d.id === deviceId ? { ...d, isOn: !d.isOn } : d));
   }, []);
 
-  // Toggle grid
-  const toggleGrid = useCallback(() => {
-    setGridAvailable(prev => {
-      const next = !prev;
-      if (!next) {
-        setPowerSource('inverter');
-        addAlert('warning', 'Grid (NEPA) power lost — switched to inverter battery');
-      } else {
-        setPowerSource('grid');
-        addAlert('info', 'Grid (NEPA) power restored — switching back to grid');
-      }
-      return next;
-    });
-  }, []);
+  const addAlert = useCallback(
+    (type, message) => {
+      if (!settings.alertsEnabled) return;
+      const id = ++alertIdRef.current;
+      setAlerts((prev) => [{ id, type, message, timestamp: new Date() }, ...prev.slice(0, 9)]);
+      setTimeout(() => {
+        setAlerts((prev) => prev.filter((alert) => alert.id !== id));
+      }, 6000);
+    },
+    [settings.alertsEnabled],
+  );
 
-  // Toggle generator
-  const toggleGenerator = useCallback(() => {
-    setGeneratorAvailable(prev => {
-      const next = !prev;
-      if (next && !gridAvailable) {
-        setPowerSource('generator');
-        addAlert('success', 'Generator activated — charging battery');
-      } else if (!next && powerSource === 'generator') {
-        setPowerSource('inverter');
-        addAlert('warning', 'Generator off — switched back to inverter');
-      }
-      return next;
-    });
-  }, [gridAvailable, powerSource]);
-
-  // Add alert
-  const addAlert = useCallback((type, message) => {
-    if (!settings.alertsEnabled) return;
-    const id = ++alertIdRef.current;
-    setAlerts(prev => [{ id, type, message, timestamp: new Date() }, ...prev.slice(0, 9)]);
-    // Auto-remove toast after 5s
-    setTimeout(() => {
-      setAlerts(prev => prev.filter(a => a.id !== id));
-    }, 6000);
-  }, [settings.alertsEnabled]);
-
-  // Dismiss alert
   const dismissAlert = useCallback((id) => {
-    setAlerts(prev => prev.filter(a => a.id !== id));
+    setAlerts((prev) => prev.filter((alert) => alert.id !== id));
   }, []);
 
-  // Update settings
   const updateSettings = useCallback((key, value) => {
-    setSettings(prev => {
+    setSettings((prev) => {
       const next = typeof key === 'object' ? { ...prev, ...key } : { ...prev, [key]: value };
       localStorage.setItem('vw_settings', JSON.stringify(next));
       return next;
     });
   }, []);
 
-  // Apply dark/light mode
+  const toggleDevice = useCallback((deviceId) => {
+    setDevices((prev) =>
+      prev.map((device) => (device.id === deviceId ? { ...device, isOn: !device.isOn } : device)),
+    );
+  }, []);
+
+  const toggleGrid = useCallback(() => {
+    setGridAvailable((prev) => {
+      const next = !prev;
+      if (!next) {
+        setPowerSource('inverter');
+        addAlert('warning', 'Grid (NEPA) power lost - switched to inverter battery');
+      } else {
+        setPowerSource('grid');
+        addAlert('info', 'Grid (NEPA) power restored - switching back to grid');
+      }
+      return next;
+    });
+  }, [addAlert]);
+
+  const toggleGenerator = useCallback(() => {
+    setGeneratorAvailable((prev) => {
+      const next = !prev;
+      if (next && !gridAvailable) {
+        setPowerSource('generator');
+        addAlert('success', 'Generator activated - charging battery');
+      } else if (!next && powerSource === 'generator') {
+        setPowerSource('inverter');
+        addAlert('warning', 'Generator off - switched back to inverter');
+      }
+      return next;
+    });
+  }, [addAlert, gridAvailable, powerSource]);
+
   useEffect(() => {
-    if (settings.darkMode) {
-      document.documentElement.classList.remove('light-mode');
-    } else {
-      document.documentElement.classList.add('light-mode');
-    }
+    document.documentElement.dataset.theme = settings.darkMode ? 'dark' : 'light';
   }, [settings.darkMode]);
 
-  // ---- Main simulation loop ----
   useEffect(() => {
     const interval = setInterval(() => {
-      setBatteryPct(prev => {
+      setBatteryPct((prev) => {
         let next = prev;
         const isCharging = powerSource === 'grid' || powerSource === 'generator';
-        const chargeRate = powerSource === 'generator' ? 0.4 : 0.3; // % per tick
-        const drainRate = totalLoad / BATTERY_CAPACITY_WH / 36; // realistic drain per 2s tick
+        const chargeRate = powerSource === 'generator' ? 0.4 : 0.3;
+        const drainRate = totalLoad / BATTERY_CAPACITY_WH / 36;
 
         if (isCharging) {
-          next = Math.min(100, prev + chargeRate - (drainRate * 0.3));
+          next = Math.min(100, prev + chargeRate - drainRate * 0.3);
           setChargingStatus(next >= 99.5 ? 'idle' : 'charging');
         } else {
-          // On inverter
           next = Math.max(0, prev - drainRate);
           setChargingStatus('discharging');
         }
 
-        // Smart auto-switching logic
         if (next <= 0 && powerSource === 'inverter') {
           next = 0;
           if (generatorAvailable) {
             setPowerSource('generator');
-            addAlert('warning', 'Battery depleted — emergency generator started');
+            addAlert('warning', 'Battery depleted - emergency generator started');
           } else {
             addAlert('error', 'Battery depleted! No power source available.');
           }
         }
 
-        return parseFloat(next.toFixed(2));
+        return Number.parseFloat(next.toFixed(2));
       });
 
-      // Update historical data every tick
-      setHistoricalData(prev => {
+      setHistoricalData((prev) => {
         const now = new Date();
         const newPoint = {
           time: now.toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' }),
@@ -205,26 +181,29 @@ export const AppProvider = ({ children }) => {
     }, 2000);
 
     return () => clearInterval(interval);
-  }, [powerSource, totalLoad, generatorAvailable, addAlert]);
+  }, [addAlert, batteryPct, generatorAvailable, powerSource, totalLoad]);
 
-  // Alert checks
   useEffect(() => {
     if (!settings.alertsEnabled) return;
+
     const key = `low_${Math.floor(batteryPct / 5) * 5}`;
     if (batteryPct <= settings.lowBatteryThreshold && !shownAlertsRef.current.has(key)) {
       shownAlertsRef.current.add(key);
       if (settings.notifications?.lowBattery) {
-        addAlert('warning', `Battery low: ${Math.round(batteryPct)}% — consider switching to grid or generator`);
+        addAlert('warning', `Battery low: ${Math.round(batteryPct)}% - consider switching to grid or generator`);
       }
     }
+
     if (batteryPct > settings.lowBatteryThreshold + 5) {
-      // Clear low battery keys to allow re-alerting
-      shownAlertsRef.current = new Set([...shownAlertsRef.current].filter(k => !k.startsWith('low_')));
+      shownAlertsRef.current = new Set(
+        [...shownAlertsRef.current].filter((entry) => !entry.startsWith('low_')),
+      );
     }
-  }, [batteryPct, settings]);
+  }, [addAlert, batteryPct, settings]);
 
   useEffect(() => {
     if (!settings.alertsEnabled) return;
+
     if (totalLoad > settings.overloadThreshold && !shownAlertsRef.current.has('overload')) {
       shownAlertsRef.current.add('overload');
       if (settings.notifications?.overload) {
@@ -233,23 +212,31 @@ export const AppProvider = ({ children }) => {
     } else if (totalLoad <= settings.overloadThreshold) {
       shownAlertsRef.current.delete('overload');
     }
-  }, [totalLoad, settings]);
+  }, [addAlert, settings, totalLoad]);
 
   const value = {
-    // Auth
-    isAuthenticated, user, login, logout,
-    // Settings
-    settings, updateSettings,
-    // Power
-    batteryPct, totalLoad, powerSource, gridAvailable, generatorAvailable,
-    chargingStatus, backupTimeMinutes, formatBackupTime,
-    toggleGrid, toggleGenerator,
-    // Devices
-    devices, toggleDevice,
-    // Analytics
+    isAuthenticated,
+    user,
+    login,
+    logout,
+    settings,
+    updateSettings,
+    batteryPct,
+    totalLoad,
+    powerSource,
+    gridAvailable,
+    generatorAvailable,
+    chargingStatus,
+    backupTimeMinutes,
+    formatBackupTime,
+    toggleGrid,
+    toggleGenerator,
+    devices,
+    toggleDevice,
     historicalData,
-    // Alerts
-    alerts, addAlert, dismissAlert,
+    alerts,
+    addAlert,
+    dismissAlert,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
