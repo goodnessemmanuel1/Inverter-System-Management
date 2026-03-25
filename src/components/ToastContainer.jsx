@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { X, AlertTriangle, CheckCircle, Info, XCircle, Zap } from 'lucide-react';
+import { X, AlertTriangle, CheckCircle, Info, XCircle } from 'lucide-react';
 
 const icons = {
   warning: <AlertTriangle size={15} color="#f59e0b" />,
@@ -32,7 +32,7 @@ function Toast({ alert, onDismiss }) {
         display: 'flex', alignItems: 'flex-start', gap: '10px',
         background: c.bg, border: `1px solid ${c.border}`, borderRadius: '12px',
         padding: '12px 14px', marginBottom: '8px', maxWidth: '360px',
-        boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
+        boxShadow: '0 10px 24px rgba(0,0,0,0.12)',
         backdropFilter: 'blur(12px)',
       }}
     >
@@ -41,13 +41,13 @@ function Toast({ alert, onDismiss }) {
         <div style={{ fontSize: '12px', fontWeight: 600, color: c.text, textTransform: 'capitalize', marginBottom: '2px' }}>
           {alert.type}
         </div>
-        <div style={{ fontSize: '12px', color: 'rgba(203,213,225,0.85)', lineHeight: 1.4 }}>
+        <div style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
           {alert.message}
         </div>
       </div>
       <button
         onClick={dismiss}
-        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(148,163,184,0.5)', padding: '2px', flexShrink: 0 }}
+        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-soft)', padding: '2px', flexShrink: 0 }}
       >
         <X size={14} />
       </button>
@@ -57,7 +57,6 @@ function Toast({ alert, onDismiss }) {
 
 export default function ToastContainer() {
   const { alerts, dismissAlert } = useApp();
-  // Show only the latest 3 toasts
   const visible = alerts.slice(0, 3);
 
   return (
